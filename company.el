@@ -191,8 +191,10 @@ buffer-local wherever it is set."
 (defun company-frontends-set (variable value)
   ;; Uniquify.
   (let ((value (delete-dups (copy-sequence value))))
-    (and (memq 'company-pseudo-tooltip-unless-just-one-frontend value)
-         (memq 'company-pseudo-tooltip-frontend value)
+    (and (or (and (memq 'company-pseudo-tooltip-unless-just-one-frontend value)
+                  (memq 'company-pseudo-tooltip-frontend value))
+             (and (memq 'company-pseudo-tooltip-unless-just-one-frontend-delay value)
+                  (memq 'company-pseudo-tooltip-frontend value)))
          (error "Pseudo tooltip frontend cannot be used twice"))
     (and (memq 'company-preview-if-just-one-frontend value)
          (memq 'company-preview-frontend value)
@@ -238,6 +240,8 @@ The visualized data is stored in `company-prefix', `company-candidates',
                                 company-pseudo-tooltip-frontend)
                          (const :tag "pseudo tooltip, multiple only"
                                 company-pseudo-tooltip-unless-just-one-frontend)
+                         (const :tag "pseudo tooltip, multiple only, delayed"
+                                company-pseudo-tooltip-unless-just-one-frontend-delay)
                          (const :tag "preview" company-preview-frontend)
                          (const :tag "preview, unique only"
                                 company-preview-if-just-one-frontend)
@@ -556,6 +560,13 @@ A character that is part of a valid candidate never triggers auto-completion."
   "The idle delay in seconds until completion starts automatically.
 The prefix still has to satisfy `company-minimum-prefix-length' before that
 happens.  The value of nil means no idle completion."
+  :type '(choice (const :tag "never (nil)" nil)
+                 (const :tag "immediate (0)" 0)
+                 (number :tag "seconds")))
+
+(defcustom company-idle-delay-tooltip .5
+  "The idle delay in seconds until tooltip when using
+`company-pseudo-tooltip-unless-just-one-frontend-delay`."
   :type '(choice (const :tag "never (nil)" nil)
                  (const :tag "immediate (0)" 0)
                  (number :tag "seconds")))
@@ -1017,6 +1028,7 @@ Controlled by `company-auto-complete'.")
 (defvar-local company-point nil)
 
 (defvar company-timer nil)
+(defvar company-timer-tooltip-delay nil)
 
 (defsubst company-strip-prefix (str)
   (substring str (length company-prefix)))
@@ -1550,6 +1562,8 @@ from the rest of the backends in the group, if any, will be left at the end."
           company-point nil)
     (when company-timer
       (cancel-timer company-timer))
+    (when company-timer-tooltip-delay
+      (cancel-timer company-timer-tooltip-delay))
     (company-echo-cancel t)
     (company-search-mode 0)
     (company-call-frontends 'hide)
@@ -1581,6 +1595,9 @@ from the rest of the backends in the group, if any, will be left at the end."
   (when company-timer
     (cancel-timer company-timer)
     (setq company-timer nil))
+  (when company-timer-tooltip-delay
+    (cancel-timer company-timer-tooltip-delay)
+    (setq company-timer-tooltip-delay nil))
   (company-echo-cancel t)
   (company-uninstall-map))
 
@@ -2802,6 +2819,19 @@ Returns a negative number if the tooltip should be displayed above point."
   (unless (and (eq command 'post-command)
                (company--show-inline-p))
     (company-pseudo-tooltip-frontend command)))
+
+(defun company-pseudo-tooltip-unless-just-one-frontend-delay (command)
+  "`compandy-pseudo-tooltip-unless-just-one-frontend', but shown with delay."
+  (unless (and (eq command 'post-command)
+               (company--show-inline-p))
+    (if (or (not (eq command 'post-command))
+            (overlayp company-pseudo-tooltip-overlay))
+        (company-pseudo-tooltip-frontend command)
+      (setq company-timer-tooltip-delay
+          (run-with-timer company-idle-delay-tooltip nil
+                          'company-pseudo-tooltip-frontend
+                          'post-command)))))
+
 
 ;;; overlay ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
